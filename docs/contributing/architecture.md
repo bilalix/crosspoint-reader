@@ -121,7 +121,7 @@ flowchart TD
 
 Notes:
 
-- "section cache exists" depends on cache-busting parameters such as font and layout related settings
+- "section cache exists" depends on cache-busting parameters such as font and layout-related settings
 - rendering favors reusing precomputed layout data to keep page turns responsive on constrained hardware
 - progress/session state is persisted so the reader can reopen at the last position after reboot/sleep
 

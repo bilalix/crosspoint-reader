@@ -1,27 +1,21 @@
 #!/usr/bin/env bash
 
-# Check if clang-format is availible
-command -v clang-format >/dev/null 2>&1 || {
-    printf "'clang-format' not found in current environment\n"
-    printf "install 'clang', 'clang-tools', or 'clang-format' depending on your distro/os and tooling requirements\n"
-    exit 1
-}
+# Check if clang-format is available and pick the preferred binary.
+if command -v clang-format-21 >/dev/null 2>&1; then
+  CLANG_FORMAT_BIN="clang-format-21"
+elif command -v clang-format >/dev/null 2>&1; then
+  CLANG_FORMAT_BIN="clang-format"
+else
+  printf "'clang-format' not found in current environment\n"
+  printf "Install clang-format-21 (recommended), clang, clang-tools, or clang-format depending on your distro/os and tooling requirements\n"
+  exit 1
+fi
 
 set -euo pipefail
 
 GIT_LS_FILES_FLAGS=""
 if [[ "${1:-}" == "-g" ]]; then
   GIT_LS_FILES_FLAGS="--modified"
-fi
-
-if command -v clang-format-21 >/dev/null 2>&1; then
-  CLANG_FORMAT_BIN="clang-format-21"
-elif command -v clang-format >/dev/null 2>&1; then
-  CLANG_FORMAT_BIN="clang-format"
-else
-  echo "Error: clang-format is not installed or not in PATH."
-  echo "Install clang-format-21 (recommended) and try again."
-  exit 1
 fi
 
 CLANG_FORMAT_VERSION_RAW="$(${CLANG_FORMAT_BIN} --version)"
