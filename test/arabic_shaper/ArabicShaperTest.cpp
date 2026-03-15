@@ -22,14 +22,19 @@ int main() {
 
   expectEqual(ArabicShaper::shape("\xD9\x84\xD8\xA7"), {0xFEFB});
   expectEqual(ArabicShaper::shape("\xD8\xA8\xD9\x84\xD8\xA7"), {0xFEFC, 0xFE91});
+  expectEqual(ArabicShaper::shape("\xD8\xA7\xD9\x84\xD8\xA5\xD8\xB9\xD8\xAF\xD8\xA7\xD8\xAF\xD8\xA7\xD8\xAA"),
+              {0xFE95, 0xFE8D, 0xFEA9, 0xFE8D, 0xFEAA, 0xFECB, 0xFEF9, 0xFE8D});
 
   expectEqual(ArabicShaper::shape("\xD8\xA8\xD9\x8E"), {0xFE8F, 0x064E});
 
   const std::vector<uint32_t> mixed = ArabicShaper::shape("abc \xD8\xB3\xD9\x84\xD8\xA7\xD9\x85 xyz");
-  expectEqual(mixed, {'a', 'b', 'c', ' ', ' ', 0xFEE2, 0xFEFC, 0xFEB3, 'x', 'y', 'z'});
+  expectEqual(mixed, {'a', 'b', 'c', ' ', 0xFEE1, 0xFEFC, 0xFEB3, ' ', 'x', 'y', 'z'});
 
   const std::vector<uint32_t> mixedDigits = ArabicShaper::shape("abc \xD8\xB3\xD9\x84\xD8\xA7\xD9\x85 123");
-  expectEqual(mixedDigits, {'a', 'b', 'c', ' ', '1', '2', '3', ' ', 0xFEE2, 0xFEFC, 0xFEB3});
+  expectEqual(mixedDigits, {'a', 'b', 'c', ' ', 0xFEE1, 0xFEFC, 0xFEB3, ' ', '1', '2', '3'});
+
+  const std::vector<uint32_t> mixedArabicEnglish = ArabicShaper::shape("\xD8\xB4\xD8\xA8\xD9\x83\xD8\xA7\xD8\xAA WiFi");
+  expectEqual(mixedArabicEnglish, {'W', 'i', 'F', 'i', ' ', 0xFE95, 0xFE8E, 0xFEDC, 0xFE92, 0xFEB7});
 
   return 0;
 }

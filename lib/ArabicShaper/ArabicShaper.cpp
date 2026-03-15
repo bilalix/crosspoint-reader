@@ -113,6 +113,24 @@ bool isLtrStrong(const Cluster& cluster) { return cluster.type == ClusterClass::
 
 bool isLtrSpanCluster(const Cluster& cluster) { return cluster.type == ClusterClass::LatinOrDigit; }
 
+bool clusterCanConnectPrev(const Cluster& cluster) {
+  if (cluster.lamAlefAlef != 0) {
+    return true;
+  }
+
+  const ArabicShapeEntry* entry = findShapeEntry(cluster.sourceBase);
+  return entry != nullptr && entry->canConnectPrev;
+}
+
+bool clusterCanConnectNext(const Cluster& cluster) {
+  if (cluster.lamAlefAlef != 0) {
+    return false;
+  }
+
+  const ArabicShapeEntry* entry = findShapeEntry(cluster.sourceBase);
+  return entry != nullptr && entry->canConnectNext;
+}
+
 ClusterClass classifyCodepoint(const uint32_t codepoint) {
   if (ScriptDetector::isArabicCodepoint(codepoint)) {
     return ClusterClass::Arabic;
@@ -229,11 +247,10 @@ std::vector<Cluster> shapeLogicalClusters(const std::vector<Cluster>& decoded) {
     const bool nextArabic = i + 1 < shaped.size() && ScriptDetector::isArabicCodepoint(shaped[i + 1].sourceBase);
 
     const ArabicShapeEntry* entry = findShapeEntry(cluster.sourceBase);
-    const ArabicShapeEntry* prevEntry = prevArabic ? findShapeEntry(shaped[i - 1].sourceBase) : nullptr;
-    const ArabicShapeEntry* nextEntry = nextArabic ? findShapeEntry(shaped[i + 1].sourceBase) : nullptr;
-
-    const bool connectPrev = prevEntry != nullptr && entry != nullptr && prevEntry->canConnectNext && entry->canConnectPrev;
-    const bool connectNext = nextEntry != nullptr && entry != nullptr && entry->canConnectNext && nextEntry->canConnectPrev;
+    const bool connectPrev = prevArabic && entry != nullptr && clusterCanConnectNext(shaped[i - 1]) &&
+                             clusterCanConnectPrev(cluster);
+    const bool connectNext = nextArabic && entry != nullptr && clusterCanConnectNext(cluster) &&
+                             clusterCanConnectPrev(shaped[i + 1]);
 
     if (cluster.lamAlefAlef != 0) {
       cluster.base = lamAlefLigature(cluster.lamAlefAlef, connectPrev);
@@ -266,11 +283,59 @@ std::vector<Cluster> reorderVisual(const std::vector<Cluster>& logical) {
   std::vector<Cluster> visual;
   visual.reserve(logical.size());
 
+  bool baseRtl = false;
+  for (const Cluster& cluster : logical) {
+    if (isArabicStrong(cluster)) {
+      baseRtl = true;
+      break;
+    }
+    if (isLtrStrong(cluster)) {
+      break;
+    }
+  }
+
   size_t i = 0;
   while (i < logical.size()) {
     if (!isArabicStrong(logical[i])) {
       visual.push_back(logical[i]);
       ++i;
+      continue;
+    }
+
+    size_t arabicEnd = i + 1;
+    while (arabicEnd < logical.size() && isArabicStrong(logical[arabicEnd])) {
+      ++arabicEnd;
+    }
+
+    size_t neutralStart = arabicEnd;
+    while (neutralStart < logical.size() && !isArabicStrong(logical[neutralStart]) && !isLtrStrong(logical[neutralStart])) {
+      ++neutralStart;
+    }
+
+    size_t ltrEnd = neutralStart;
+    while (ltrEnd < logical.size() && isLtrSpanCluster(logical[ltrEnd])) {
+      ++ltrEnd;
+    }
+
+    if (baseRtl && neutralStart > arabicEnd && ltrEnd > neutralStart) {
+      for (size_t index = neutralStart; index < ltrEnd; ++index) {
+        visual.push_back(logical[index]);
+      }
+      for (size_t index = arabicEnd; index < neutralStart; ++index) {
+        visual.push_back(logical[index]);
+      }
+      for (size_t index = arabicEnd; index > i; --index) {
+        visual.push_back(logical[index - 1]);
+      }
+      i = ltrEnd;
+      continue;
+    }
+
+    if (!baseRtl) {
+      for (size_t index = arabicEnd; index > i; --index) {
+        visual.push_back(logical[index - 1]);
+      }
+      i = arabicEnd;
       continue;
     }
 

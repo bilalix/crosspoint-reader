@@ -5,6 +5,7 @@
 int main() {
   using ScriptDetector::containsArabic;
   using ScriptDetector::isArabicCodepoint;
+  using ScriptDetector::isRtlLanguageTag;
 
   assert(isArabicCodepoint(0x0627));
   assert(isArabicCodepoint(0x0750));
@@ -18,6 +19,14 @@ int main() {
   assert(!containsArabic("Plain ASCII text"));
   assert(!containsArabic(u8"Русский текст"));
   assert(!containsArabic(nullptr));
+
+  assert(isRtlLanguageTag("ar"));
+  assert(isRtlLanguageTag("ar-SA"));
+  assert(isRtlLanguageTag("fa"));
+  assert(isRtlLanguageTag("ur_PK"));
+  assert(!isRtlLanguageTag("en"));
+  assert(!isRtlLanguageTag("as"));
+  assert(!isRtlLanguageTag(nullptr));
 
   return 0;
 }

@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <ScriptDetector.h>
 #include <Utf8.h>
 #include <expat.h>
 
@@ -91,10 +92,13 @@ bool tryInterpretHtmlDirection(const char* dirAttr, bool& isRtl) {
   return false;
 }
 
-bool resolveElementRtl(const bool parentRtl, const CssStyle& cssStyle, const char* dirAttr) {
+bool resolveElementRtl(const bool parentRtl, const CssStyle& cssStyle, const char* dirAttr, const char* langAttr) {
   bool isRtl = parentRtl;
   if (cssStyle.hasDirection()) {
     isRtl = cssStyle.direction == CssDirection::Rtl;
+  }
+  if (ScriptDetector::isRtlLanguageTag(langAttr)) {
+    isRtl = true;
   }
   bool htmlDirRtl = false;
   if (tryInterpretHtmlDirection(dirAttr, htmlDirRtl)) {
@@ -197,6 +201,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   std::string classAttr;
   std::string styleAttr;
   const char* dirAttr = nullptr;
+  const char* langAttr = nullptr;
   if (atts != nullptr) {
     for (int i = 0; atts[i]; i += 2) {
       if (strcmp(atts[i], "class") == 0) {
@@ -208,6 +213,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         self->pendingAnchorId = atts[i + 1];
       } else if (strcmp(atts[i], "dir") == 0) {
         dirAttr = atts[i + 1];
+      } else if (strcmp(atts[i], "lang") == 0 || strcmp(atts[i], "xml:lang") == 0) {
+        langAttr = atts[i + 1];
       }
     }
   }
@@ -220,8 +227,9 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     cssStyle.applyOver(CssParser::parseInlineStyle(styleAttr));
   }
 
-  const bool elementRtl = resolveElementRtl(parentRtl, cssStyle, dirAttr);
-  if (self->currentTextBlock && self->currentTextBlock->isEmpty() && (cssStyle.hasDirection() || dirAttr != nullptr)) {
+  const bool elementRtl = resolveElementRtl(parentRtl, cssStyle, dirAttr, langAttr);
+  if (self->currentTextBlock && self->currentTextBlock->isEmpty() &&
+      (cssStyle.hasDirection() || dirAttr != nullptr || ScriptDetector::isRtlLanguageTag(langAttr))) {
     self->currentTextBlock->setRtl(elementRtl);
   }
 
