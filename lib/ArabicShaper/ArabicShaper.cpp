@@ -124,6 +124,14 @@ uint32_t matchingClosingBracket(const uint32_t codepoint) {
   }
 }
 
+bool isDoubleAngleOpenAt(const std::vector<Cluster>& logical, const size_t index) {
+  return index + 1 < logical.size() && logical[index].base == '<' && logical[index + 1].base == '<';
+}
+
+bool isDoubleAngleCloseAt(const std::vector<Cluster>& logical, const size_t index) {
+  return index + 1 < logical.size() && logical[index].base == '>' && logical[index + 1].base == '>';
+}
+
 bool isArabicStrong(const Cluster& cluster) { return cluster.type == ClusterClass::Arabic; }
 
 bool isLtrStrong(const Cluster& cluster) { return cluster.type == ClusterClass::LatinOrDigit && !isAsciiDigit(cluster.base); }
@@ -313,6 +321,24 @@ std::vector<Cluster> reorderVisual(const std::vector<Cluster>& logical) {
 
   size_t i = 0;
   while (i < logical.size()) {
+    if (baseRtl && isDoubleAngleOpenAt(logical, i) && i + 2 < logical.size() && isArabicStrong(logical[i + 2])) {
+      size_t arabicEnd = i + 2;
+      while (arabicEnd < logical.size() && isArabicStrong(logical[arabicEnd])) {
+        ++arabicEnd;
+      }
+      if (arabicEnd + 1 < logical.size() && isDoubleAngleCloseAt(logical, arabicEnd)) {
+        visual.push_back(logical[i]);
+        visual.push_back(logical[i + 1]);
+        for (size_t index = arabicEnd; index > i + 2; --index) {
+          visual.push_back(logical[index - 1]);
+        }
+        visual.push_back(logical[arabicEnd]);
+        visual.push_back(logical[arabicEnd + 1]);
+        i = arabicEnd + 2;
+        continue;
+      }
+    }
+
     if (baseRtl && isOpeningBracket(logical[i].base) && i + 1 < logical.size() && isArabicStrong(logical[i + 1])) {
       size_t arabicEnd = i + 1;
       while (arabicEnd < logical.size() && isArabicStrong(logical[arabicEnd])) {
@@ -357,6 +383,30 @@ std::vector<Cluster> reorderVisual(const std::vector<Cluster>& logical) {
     }
 
     if (baseRtl && neutralStart > arabicEnd && ltrEnd > neutralStart) {
+      const bool wrappedDoubleAngleLtr =
+          neutralStart > arabicEnd + 1 && logical[neutralStart - 2].base == '<' && logical[neutralStart - 1].base == '<' &&
+          trailingNeutralEnd > ltrEnd + 1 && logical[ltrEnd].base == '>' && logical[ltrEnd + 1].base == '>';
+      if (wrappedDoubleAngleLtr) {
+        visual.push_back(logical[neutralStart - 2]);
+        visual.push_back(logical[neutralStart - 1]);
+        for (size_t index = neutralStart; index < ltrEnd; ++index) {
+          visual.push_back(logical[index]);
+        }
+        visual.push_back(logical[ltrEnd]);
+        visual.push_back(logical[ltrEnd + 1]);
+        for (size_t index = arabicEnd; index < neutralStart - 2; ++index) {
+          visual.push_back(logical[index]);
+        }
+        for (size_t index = arabicEnd; index > i; --index) {
+          visual.push_back(logical[index - 1]);
+        }
+        for (size_t index = ltrEnd + 2; index < trailingNeutralEnd; ++index) {
+          visual.push_back(logical[index]);
+        }
+        i = trailingNeutralEnd;
+        continue;
+      }
+
       const bool wrappedLtr = neutralStart > arabicEnd && isOpeningBracket(logical[neutralStart - 1].base) &&
                               trailingNeutralEnd > ltrEnd &&
                               logical[ltrEnd].base == matchingClosingBracket(logical[neutralStart - 1].base);
