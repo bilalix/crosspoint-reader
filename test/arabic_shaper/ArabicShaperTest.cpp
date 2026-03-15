@@ -36,5 +36,12 @@ int main() {
   const std::vector<uint32_t> mixedArabicEnglish = ArabicShaper::shape("\xD8\xB4\xD8\xA8\xD9\x83\xD8\xA7\xD8\xAA WiFi");
   expectEqual(mixedArabicEnglish, {'W', 'i', 'F', 'i', ' ', 0xFE95, 0xFE8E, 0xFEDC, 0xFE92, 0xFEB7});
 
+  const std::vector<uint32_t> rtlParens = ArabicShaper::shape("(\xD8\xA7\xD9\x84\xD9\x86\xD8\xB5)");
+  expectEqual(rtlParens, {'(', 0xFEBA, 0xFEE8, 0xFEDF, 0xFE8D, ')'});
+
+  const std::vector<uint32_t> rtlMixedParens =
+      ArabicShaper::shape("\xD8\xA7\xD9\x84\xD9\x86\xD8\xB5 (test)");
+  expectEqual(rtlMixedParens, {'(', 't', 'e', 's', 't', ')', ' ', 0xFEBA, 0xFEE8, 0xFEDF, 0xFE8D});
+
   return 0;
 }

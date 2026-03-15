@@ -103,8 +103,25 @@ bool isAsciiAlpha(const uint32_t codepoint) {
   return (codepoint >= 'A' && codepoint <= 'Z') || (codepoint >= 'a' && codepoint <= 'z');
 }
 
-bool isWhitespace(const uint32_t codepoint) {
-  return codepoint == ' ' || codepoint == '\t' || codepoint == '\n' || codepoint == '\r';
+bool isWhitespace(const uint32_t codepoint) { return codepoint == ' ' || codepoint == '\t' || codepoint == '\n' || codepoint == '\r'; }
+
+bool isOpeningBracket(const uint32_t codepoint) {
+  return codepoint == '(' || codepoint == '[' || codepoint == '{' || codepoint == '<';
+}
+
+uint32_t matchingClosingBracket(const uint32_t codepoint) {
+  switch (codepoint) {
+    case '(':
+      return ')';
+    case '[':
+      return ']';
+    case '{':
+      return '}';
+    case '<':
+      return '>';
+    default:
+      return 0;
+  }
 }
 
 bool isArabicStrong(const Cluster& cluster) { return cluster.type == ClusterClass::Arabic; }
@@ -296,6 +313,22 @@ std::vector<Cluster> reorderVisual(const std::vector<Cluster>& logical) {
 
   size_t i = 0;
   while (i < logical.size()) {
+    if (baseRtl && isOpeningBracket(logical[i].base) && i + 1 < logical.size() && isArabicStrong(logical[i + 1])) {
+      size_t arabicEnd = i + 1;
+      while (arabicEnd < logical.size() && isArabicStrong(logical[arabicEnd])) {
+        ++arabicEnd;
+      }
+      if (arabicEnd < logical.size() && logical[arabicEnd].base == matchingClosingBracket(logical[i].base)) {
+        visual.push_back(logical[i]);
+        for (size_t index = arabicEnd; index > i + 1; --index) {
+          visual.push_back(logical[index - 1]);
+        }
+        visual.push_back(logical[arabicEnd]);
+        i = arabicEnd + 1;
+        continue;
+      }
+    }
+
     if (!isArabicStrong(logical[i])) {
       visual.push_back(logical[i]);
       ++i;
@@ -317,7 +350,35 @@ std::vector<Cluster> reorderVisual(const std::vector<Cluster>& logical) {
       ++ltrEnd;
     }
 
+    size_t trailingNeutralEnd = ltrEnd;
+    while (trailingNeutralEnd < logical.size() && !isArabicStrong(logical[trailingNeutralEnd]) &&
+           !isLtrStrong(logical[trailingNeutralEnd])) {
+      ++trailingNeutralEnd;
+    }
+
     if (baseRtl && neutralStart > arabicEnd && ltrEnd > neutralStart) {
+      const bool wrappedLtr = neutralStart > arabicEnd && isOpeningBracket(logical[neutralStart - 1].base) &&
+                              trailingNeutralEnd > ltrEnd &&
+                              logical[ltrEnd].base == matchingClosingBracket(logical[neutralStart - 1].base);
+      if (wrappedLtr) {
+        visual.push_back(logical[neutralStart - 1]);
+        for (size_t index = neutralStart; index < ltrEnd; ++index) {
+          visual.push_back(logical[index]);
+        }
+        visual.push_back(logical[ltrEnd]);
+        for (size_t index = arabicEnd; index < neutralStart - 1; ++index) {
+          visual.push_back(logical[index]);
+        }
+        for (size_t index = arabicEnd; index > i; --index) {
+          visual.push_back(logical[index - 1]);
+        }
+        for (size_t index = ltrEnd + 1; index < trailingNeutralEnd; ++index) {
+          visual.push_back(logical[index]);
+        }
+        i = trailingNeutralEnd;
+        continue;
+      }
+
       for (size_t index = neutralStart; index < ltrEnd; ++index) {
         visual.push_back(logical[index]);
       }

@@ -56,9 +56,11 @@ void testRtlPositionsStartFromRightEdge() {
 
   const auto line = singleLineFrom(parsedText, 100);
   const auto& xpos = line->getWordXpos();
+  const auto& words = line->getWords();
   expect(line->getIsRtl(), "expected RTL line metadata");
-  expect(xpos.size() == 3, "expected three RTL word positions");
-  expect(xpos[0] == 70 && xpos[1] == 45 && xpos[2] == 30, "unexpected RTL word positions");
+  expect(xpos.size() == 1, "expected contiguous Latin text in RTL to merge into one rendered segment");
+  expect(words.size() == 1 && words[0] == "aaa bb c", "expected merged Latin text to preserve spaces");
+  expect(xpos[0] == 30, "unexpected RTL merged-run position");
 }
 
 void testRtlTextIndentUsesRightLeadingEdge() {
@@ -72,8 +74,43 @@ void testRtlTextIndentUsesRightLeadingEdge() {
 
   const auto line = singleLineFrom(parsedText, 100);
   const auto& xpos = line->getWordXpos();
-  expect(xpos.size() == 2, "expected two RTL word positions with indent");
-  expect(xpos[0] == 60 && xpos[1] == 35, "unexpected RTL indented word positions");
+  const auto& words = line->getWords();
+  expect(xpos.size() == 1, "expected indented RTL Latin text to merge into one rendered segment");
+  expect(words.size() == 1 && words[0] == "aaa bb", "expected merged indented run to preserve spaces");
+  expect(xpos[0] == 35, "unexpected RTL indented merged-run position");
+}
+
+void testRtlLineKeepsEmbeddedLtrWordsLeftToRight() {
+  BlockStyle style;
+  style.alignment = CssTextAlign::Justify;
+  ParsedText parsedText(true, false, style, true);
+  parsedText.addWord(u8"نص", EpdFontFamily::REGULAR);
+  parsedText.addWord("(Pomerantz", EpdFontFamily::REGULAR);
+  parsedText.addWord("2015)", EpdFontFamily::REGULAR);
+  parsedText.addWord(u8"آخر", EpdFontFamily::REGULAR);
+
+  const auto line = singleLineFrom(parsedText, 320);
+  const auto& xpos = line->getWordXpos();
+  const auto& words = line->getWords();
+  expect(xpos.size() == 3, "expected embedded LTR run to merge into a single rendered segment");
+  expect(words.size() == 3, "expected three rendered words after merging the embedded LTR run");
+  expect(words[1] == "(Pomerantz 2015)", "expected embedded citation text to preserve spaces and parentheses");
+}
+
+void testRtlLineMergesMultiWordLtrCitationRuns() {
+  BlockStyle style;
+  style.alignment = CssTextAlign::Justify;
+  ParsedText parsedText(true, false, style, true);
+  parsedText.addWord(u8"مثال", EpdFontFamily::REGULAR);
+  parsedText.addWord("(Mutchler", EpdFontFamily::REGULAR);
+  parsedText.addWord("and", EpdFontFamily::REGULAR);
+  parsedText.addWord("2014)", EpdFontFamily::REGULAR);
+  parsedText.addWord(u8"آخر", EpdFontFamily::REGULAR);
+
+  const auto line = singleLineFrom(parsedText, 360);
+  const auto& words = line->getWords();
+  expect(words.size() == 3, "expected multi-word citation run to merge into one rendered segment");
+  expect(words[1] == "(Mutchler and 2014)", "expected merged citation run to keep its original LTR ordering");
 }
 
 }  // namespace
@@ -82,5 +119,7 @@ int main() {
   testLtrPositionsRemainLeftOrigin();
   testRtlPositionsStartFromRightEdge();
   testRtlTextIndentUsesRightLeadingEdge();
+  testRtlLineKeepsEmbeddedLtrWordsLeftToRight();
+  testRtlLineMergesMultiWordLtrCitationRuns();
   return 0;
 }

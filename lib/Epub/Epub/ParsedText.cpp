@@ -1,6 +1,7 @@
 #include "ParsedText.h"
 
 #include <GfxRenderer.h>
+#include <ScriptDetector.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -79,6 +80,80 @@ bool usesLeadingIndent(const BlockStyle& blockStyle, const bool isRtl) {
     return true;
   }
   return isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left;
+}
+
+bool isAsciiWhitespaceCodepoint(const uint32_t cp) {
+  return cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r';
+}
+
+bool wordIsLtrRunCandidate(const std::string& word) {
+  if (ScriptDetector::containsArabic(word.c_str())) {
+    return false;
+  }
+
+  const auto* ptr = reinterpret_cast<const unsigned char*>(word.c_str());
+  while (*ptr != 0) {
+    const uint32_t cp = utf8NextCodepoint(&ptr);
+    if ((cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool isAsciiLtrNeutralCodepoint(const uint32_t cp) {
+  switch (cp) {
+    case '(':
+    case ')':
+    case '[':
+    case ']':
+    case '{':
+    case '}':
+    case '<':
+    case '>':
+    case '.':
+    case ',':
+    case ':':
+    case ';':
+    case '!':
+    case '?':
+    case '"':
+    case '\'':
+    case '/':
+    case '\\':
+    case '-':
+    case '_':
+    case '+':
+    case '=':
+    case '&':
+    case '#':
+    case '%':
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool wordIsLtrNeutralToken(const std::string& word) {
+  if (word.empty() || ScriptDetector::containsArabic(word.c_str())) {
+    return false;
+  }
+
+  bool sawCodepoint = false;
+  const auto* ptr = reinterpret_cast<const unsigned char*>(word.c_str());
+  while (*ptr != 0) {
+    const uint32_t cp = utf8NextCodepoint(&ptr);
+    if (isAsciiWhitespaceCodepoint(cp)) {
+      return false;
+    }
+    if (!isAsciiLtrNeutralCodepoint(cp)) {
+      return false;
+    }
+    sawCodepoint = true;
+  }
+
+  return sawCodepoint;
 }
 
 }  // namespace
@@ -485,7 +560,23 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   const int renderedLineWidth = lineWordWidthSum + totalNaturalGaps + justifyExtra * static_cast<int>(actualGapCount);
 
   std::vector<int16_t> lineXPos;
-  lineXPos.reserve(lineWordCount);
+  lineXPos.resize(lineWordCount);
+
+  auto lineWordStartsLtrRun = [&](const size_t wordIdx) {
+    if (wordIsLtrRunCandidate(words[lastBreakAt + wordIdx])) {
+      return true;
+    }
+    if (!wordIsLtrNeutralToken(words[lastBreakAt + wordIdx])) {
+      return false;
+    }
+    return wordIdx + 1 < lineWordCount &&
+           (wordIsLtrRunCandidate(words[lastBreakAt + wordIdx + 1]) ||
+            wordIsLtrNeutralToken(words[lastBreakAt + wordIdx + 1]));
+  };
+
+  auto lineWordBelongsToLtrRun = [&](const size_t wordIdx) {
+    return wordIsLtrRunCandidate(words[lastBreakAt + wordIdx]) || wordIsLtrNeutralToken(words[lastBreakAt + wordIdx]);
+  };
 
   if (isRtl) {
     int currentRight = effectivePageWidth;
@@ -495,9 +586,57 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       currentRight = (effectivePageWidth - renderedLineWidth) / 2 + renderedLineWidth;
     }
 
-    for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
+    auto gapAfter = [&](const size_t wordIdx) {
+      const bool nextIsContinuation = wordIdx + 1 < lineWordCount && continuesVec[lastBreakAt + wordIdx + 1];
+      if (nextIsContinuation) {
+        return renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
+                                   firstCodepoint(words[lastBreakAt + wordIdx + 1]),
+                                   wordStyles[lastBreakAt + wordIdx]);
+      }
+
+      int gap = 0;
+      if (wordIdx + 1 < lineWordCount) {
+        gap = renderer.getSpaceAdvance(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
+                                       firstCodepoint(words[lastBreakAt + wordIdx + 1]),
+                                       wordStyles[lastBreakAt + wordIdx]);
+      }
+      if (blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
+        gap += justifyExtra;
+      }
+      return gap;
+    };
+
+    for (size_t wordIdx = 0; wordIdx < lineWordCount;) {
+      if (lineWordStartsLtrRun(wordIdx)) {
+        size_t runEnd = wordIdx + 1;
+        while (runEnd < lineWordCount && lineWordBelongsToLtrRun(runEnd)) {
+          ++runEnd;
+        }
+
+        int runWidth = 0;
+        for (size_t runIdx = wordIdx; runIdx < runEnd; ++runIdx) {
+          runWidth += wordWidths[lastBreakAt + runIdx];
+          if (runIdx + 1 < runEnd) {
+            runWidth += gapAfter(runIdx);
+          }
+        }
+
+        int currentLeft = currentRight - runWidth;
+        for (size_t runIdx = wordIdx; runIdx < runEnd; ++runIdx) {
+          lineXPos[runIdx] = static_cast<int16_t>(currentLeft);
+          currentLeft += wordWidths[lastBreakAt + runIdx];
+          if (runIdx + 1 < runEnd) {
+            currentLeft += gapAfter(runIdx);
+          }
+        }
+
+        currentRight = currentRight - runWidth - gapAfter(runEnd - 1);
+        wordIdx = runEnd;
+        continue;
+      }
+
       const int wordWidth = wordWidths[lastBreakAt + wordIdx];
-      lineXPos.push_back(static_cast<int16_t>(currentRight - wordWidth));
+      lineXPos[wordIdx] = static_cast<int16_t>(currentRight - wordWidth);
 
       const bool nextIsContinuation = wordIdx + 1 < lineWordCount && continuesVec[lastBreakAt + wordIdx + 1];
       if (nextIsContinuation) {
@@ -518,6 +657,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
         }
         currentRight -= wordWidth + gap;
       }
+      ++wordIdx;
     }
   } else {
     int xpos = firstLineIndent;
@@ -528,7 +668,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     }
 
     for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
-      lineXPos.push_back(static_cast<int16_t>(xpos));
+      lineXPos[wordIdx] = static_cast<int16_t>(xpos);
 
       const bool nextIsContinuation = wordIdx + 1 < lineWordCount && continuesVec[lastBreakAt + wordIdx + 1];
       if (nextIsContinuation) {
@@ -560,6 +700,68 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     if (containsSoftHyphen(word)) {
       stripSoftHyphensInPlace(word);
     }
+  }
+
+  if (isRtl) {
+    auto extractedWordStartsLtrRun = [&](const size_t wordIdx) {
+      if (wordIsLtrRunCandidate(lineWords[wordIdx])) {
+        return true;
+      }
+      if (!wordIsLtrNeutralToken(lineWords[wordIdx])) {
+        return false;
+      }
+      return wordIdx + 1 < lineWords.size() &&
+             (wordIsLtrRunCandidate(lineWords[wordIdx + 1]) || wordIsLtrNeutralToken(lineWords[wordIdx + 1]));
+    };
+
+    auto extractedWordBelongsToLtrRun = [&](const size_t wordIdx) {
+      return wordIsLtrRunCandidate(lineWords[wordIdx]) || wordIsLtrNeutralToken(lineWords[wordIdx]);
+    };
+
+    std::vector<std::string> mergedWords;
+    std::vector<int16_t> mergedXpos;
+    std::vector<EpdFontFamily::Style> mergedStyles;
+
+    for (size_t wordIdx = 0; wordIdx < lineWords.size();) {
+      if (!extractedWordStartsLtrRun(wordIdx)) {
+        mergedWords.push_back(std::move(lineWords[wordIdx]));
+        mergedXpos.push_back(lineXPos[wordIdx]);
+        mergedStyles.push_back(lineWordStyles[wordIdx]);
+        ++wordIdx;
+        continue;
+      }
+
+      size_t runEnd = wordIdx + 1;
+      while (runEnd < lineWords.size() && extractedWordBelongsToLtrRun(runEnd) &&
+             lineWordStyles[runEnd] == lineWordStyles[wordIdx]) {
+        ++runEnd;
+      }
+
+      if (runEnd == wordIdx + 1) {
+        mergedWords.push_back(std::move(lineWords[wordIdx]));
+        mergedXpos.push_back(lineXPos[wordIdx]);
+        mergedStyles.push_back(lineWordStyles[wordIdx]);
+        ++wordIdx;
+        continue;
+      }
+
+      std::string mergedWord;
+      for (size_t runIdx = wordIdx; runIdx < runEnd; ++runIdx) {
+        if (runIdx > wordIdx && !continuesVec[lastBreakAt + runIdx]) {
+          mergedWord.push_back(' ');
+        }
+        mergedWord += lineWords[runIdx];
+      }
+
+      mergedWords.push_back(std::move(mergedWord));
+      mergedXpos.push_back(lineXPos[wordIdx]);
+      mergedStyles.push_back(lineWordStyles[wordIdx]);
+      wordIdx = runEnd;
+    }
+
+    lineWords = std::move(mergedWords);
+    lineXPos = std::move(mergedXpos);
+    lineWordStyles = std::move(mergedStyles);
   }
 
   processLine(std::make_shared<TextBlock>(std::move(lineWords), std::move(lineXPos), std::move(lineWordStyles),
